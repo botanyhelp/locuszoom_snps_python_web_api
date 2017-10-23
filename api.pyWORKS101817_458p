@@ -1,0 +1,90 @@
+import os
+from flask import Flask, url_for, jsonify, request
+from flask.ext.sqlalchemy import SQLAlchemy
+
+basedir = os.path.abspath(os.path.dirname(__file__))
+#db_path = os.path.join(basedir, '../data.sqlite')
+db_path = os.path.join(basedir, './snp150common_name_chr_loc.sqlite')
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + db_path
+
+db = SQLAlchemy(app)
+
+
+class ValidationError(ValueError):
+    pass
+
+
+class Snp(db.Model):
+    __tablename__ = 'snps'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), index=True)
+    chromosome = db.Column(db.String(64), index=True)
+    location = db.Column(db.Integer)
+
+    def get_url(self):
+        return url_for('get_snp', id=self.id, _external=True)
+
+    def export_data(self):
+        return {
+            'self_url': self.get_url(),
+            'name': self.name,
+            'chromosome': self.chromosome,
+            'location': self.location
+        }
+
+    def import_data(self, data):
+        try:
+            self.name = data['name']
+            self.chromosome = data['chromosome']
+            self.location = data['location']
+        except KeyError as e:
+            raise ValidationError('Invalid snp: missing ' + e.args[0])
+        return self
+
+
+@app.route('/snps/', methods=['GET'])
+def get_snps():
+    return jsonify({'snps': [snp.get_url() for snp in
+                                  Snp.query.all()]})
+
+@app.route('/snps/<int:id>', methods=['GET'])
+def get_snp(id):
+    return jsonify(Snp.query.get_or_404(id).export_data())
+
+#session.query(User).filter_by(name='jack')
+#    #return jsonify(Snp.query.get_or_404(name).export_data())
+#YES1@app.route('/snp_byname/<int:nameProvided>', methods=['GET'])
+#YES2@app.route('/snp_byname/<nameProvided>', methods=['GET'])
+@app.route('/snp_byname/<string:nameProvided>', methods=['GET'])
+def get_snp_byname(nameProvided):
+    #NOreturn jsonify(Snp.query.filter_by(name=nameProvided).export_data())
+    #NOreturn jsonify(Snp.query.filter_by(id=nameProvided).export_data())
+    #NOreturn jsonify(Snp.query.filter_by(id=nameProvided).get_or_404(nameProvided).export_data())
+    #NOreturn jsonify(Snp.query.filter_by(id=nameProvided).first().get_or_404(nameProvided).export_data())
+    #YES1return jsonify(Snp.query.filter_by(id=nameProvided).first().export_data())
+    #YES2return jsonify(Snp.query.filter_by(id=nameProvided).first().export_data())
+    return jsonify(Snp.query.filter_by(name=nameProvided).first().export_data())
+
+
+@app.route('/snps/', methods=['POST'])
+def new_snp():
+    snp = Snp()
+    snp.import_data(request.json)
+    db.session.add(snp)
+    db.session.commit()
+    return jsonify({}), 201, {'Location': snp.get_url()}
+
+@app.route('/snps/<int:id>', methods=['PUT'])
+def edit_snp(id):
+    snp = Snp.query.get_or_404(id)
+    snp.import_data(request.json)
+    db.session.add(snp)
+    db.session.commit()
+    return jsonify({})
+
+
+if __name__ == '__main__':
+    db.create_all()
+    app.run(debug=True)
